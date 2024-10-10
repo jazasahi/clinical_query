@@ -75,15 +75,18 @@ if user_query:
         Provide a professional and concise answer based on the question and drug data. Focus on the facts, and organize the answer for a clinician.
         """
 
-        # Get a response from OpenAI
-        response = openai.Completion.create(
+        # Get a response from OpenAI using the new ChatCompletion API
+        response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
-            prompt=prompt,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant for clinicians."},
+                {"role": "user", "content": prompt}
+            ],
             max_tokens=500,
             temperature=0.2
         )
 
         # Output the response
-        st.write(response['choices'][0]['text'])
+        st.write(response['choices'][0]['message']['content'])
     else:
         st.write("Could not retrieve data from OpenFDA. Make sure the drug name is included in your query.")
