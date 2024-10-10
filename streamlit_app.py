@@ -1,116 +1,91 @@
 import streamlit as st
+import openai
 import requests
 
-# Define the function to query OpenFDA
-def query_openfda(drug_name):
-    url = f"https://api.fda.gov/drug/label.json?search=openfda.brand_name:{drug_name}&limit=1"
-    response = requests.get(url)
+# Hide API key using Streamlit secrets
+openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+# Single input for drug name and clinical question
+user_query = st.text_input("Enter the drug name and your clinical question:")
+
+if user_query:
+    # Process the query (extracting drug info and passing to LLM)
     
-    if response.status_code == 200:
-        data = response.json()
-        if "results" in data and len(data["results"]) > 0:
-            return data["results"][0]  # Return the first result
+    # Query OpenFDA API
+    def query_openfda(drug_name):
+        url = f"https://api.fda.gov/drug/label.json?search=openfda.brand_name:{drug_name}"
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.json()
         else:
-            st.warning(f"No data found for the drug: {drug_name}")
             return None
+
+    # Extract relevant information from OpenFDA response
+    def extract_drug_info(drug_json):
+        if 'results' in drug_json:
+            drug_info = {}
+            fields = {
+                'Brand Name': 'openfda.brand_name',
+                'Generic Name': 'openfda.generic_name',
+                'Indications': 'indications_and_usage',
+                'Warnings': 'warnings',
+                'Dosage': 'dosage_and_administration',
+                'Forms and strength': 'dosage_forms_and_strengths',
+                'Contraindications': 'contraindications',
+                'Precautions': 'warnings_and_cautions',
+                'Adverse Reactions': 'adverse_reactions',
+                'Drug Interactions': 'drug_interactions',
+                'Pregnancy': 'Pregnancy',
+                'Pediatric use': 'pediatric_use',
+                'Geriatric use': 'geriatric_use',
+                'Overdose': 'overdosage',
+                'Mechanism of action': 'mechanism_of_action',
+                'Pharmacodynamics': 'pharmacodynamics',
+                'Pharmacokinetics': 'pharmacokinetics',
+                'Clinical Studies': 'clinical_studies',
+                'How supplied': 'how_supplied',
+                'Instructions for use': 'instructions_for_use',
+                'NDC': 'package_ndc'
+            }
+            
+            # Extract fields using loop
+            for key, value in fields.items():
+                try:
+                    field_path = value.split('.')
+                    field_data = drug_json['results'][0]
+                    for path in field_path:
+                        field_data = field_data[path]
+                    drug_info[key] = field_data[0] if isinstance(field_data, list) else field_data
+                except (KeyError, IndexError):
+                    drug_info[key] = "Unknown"
+
+            return drug_info
+        else:
+            return {}
+
+    # Query OpenFDA for the drug
+    drug_json = query_openfda(user_query.split()[0])  # Extract drug name from first word
+
+    if drug_json:
+        drug_info = extract_drug_info(drug_json)
+
+        # Now, pass the combined user input and drug information to the LLM
+        prompt = f"""
+        Your task is to help a clinician answer a clinical question based on the drug's information from FDA package inserts.
+        The question is: "{user_query}"
+        The relevant drug data is provided below:
+        ```{drug_info}```
+
+        Provide a professional and concise answer based on the question and drug data. Focus on the facts, and organize the answer for a clinician.
+        """
+
+        response = openai.Completion.create(
+            model="gpt-3.5-turbo",
+            prompt=prompt,
+            max_tokens=500,
+            temperature=0.2
+        )
+
+        st.write(response['choices'][0]['text'])
     else:
-        st.error(f"Error {response.status_code}: Could not retrieve data from OpenFDA")
-        return None
-
-# Function to filter and organize the drug information
-def organize_drug_info(drug_json):
-    fields = {
-        'Brand Name': ['openfda', 'brand_name'],
-        'Generic Name': ['openfda', 'generic_name'],
-        'Indications': ['indications_and_usage'],
-        'Warnings': ['warnings'],
-        'Dosage': ['dosage_and_administration'],
-        'Forms and Strength': ['dosage_forms_and_strengths'],
-        'Contraindications': ['contraindications'],
-        'Precautions': ['warnings_and_cautions'],
-        'Adverse Reactions': ['adverse_reactions'],
-        'Drug Interactions': ['drug_interactions'],
-        'Pregnancy': ['pregnancy'],
-        'Pediatric Use': ['pediatric_use'],
-        'Geriatric Use': ['geriatric_use'],
-        'Overdose': ['overdosage'],
-        'Mechanism of Action': ['mechanism_of_action'],
-        'Pharmacodynamics': ['pharmacodynamics'],
-        'Pharmacokinetics': ['pharmacokinetics'],
-        'Clinical Studies': ['clinical_studies'],
-        'How Supplied': ['how_supplied'],
-        'Instructions for Use': ['instructions_for_use'],
-        'NDC': ['package_ndc']
-    }
-    
-    drug_info = {}
-    
-    for field, path in fields.items():
-        try:
-            # Traverse the JSON data based on the path in the fields dictionary
-            data = drug_json
-            for key in path:
-                data = data[key]  # Drill down to the required data
-            drug_info[field] = data[0] if isinstance(data, list) else data
-        except (KeyError, IndexError):
-            drug_info[field] = "Information not available"
-    
-    return drug_info
-
-# Function to filter the relevant information based on user's question
-def filter_drug_info_by_question(drug_info, user_question):
-    # Define keywords for each category
-    keyword_mapping = {
-        'Brand Name': ['brand', 'name'],
-        'Generic Name': ['generic', 'name'],
-        'Indications': ['indication', 'use', 'treat'],
-        'Warnings': ['warning', 'risk', 'caution'],
-        'Dosage': ['dosage', 'dose', 'administer'],
-        'Forms and Strength': ['form', 'strength'],
-        'Contraindications': ['contraindication', 'not use', 'avoid'],
-        'Precautions': ['precaution', 'caution', 'warning'],
-        'Adverse Reactions': ['adverse', 'reaction', 'side effect'],
-        'Drug Interactions': ['interaction', 'mix', 'drug interaction'],
-        'Pregnancy': ['pregnancy', 'pregnant', 'breastfeeding'],
-        'Pediatric Use': ['pediatric', 'child', 'children'],
-        'Geriatric Use': ['geriatric', 'elderly'],
-        'Overdose': ['overdose'],
-        'Mechanism of Action': ['mechanism', 'action'],
-        'Pharmacodynamics': ['pharmacodynamics', 'effect'],
-        'Pharmacokinetics': ['pharmacokinetics', 'absorption'],
-        'Clinical Studies': ['clinical study', 'research'],
-        'How Supplied': ['supplied', 'package'],
-        'Instructions for Use': ['instructions', 'how to use'],
-        'NDC': ['ndc', 'code']
-    }
-    
-    # Filter based on keywords in the user question
-    relevant_info = {}
-    for key, keywords in keyword_mapping.items():
-        if any(keyword in user_question.lower() for keyword in keywords):
-            relevant_info[key] = drug_info.get(key, "Information not available")
-    
-    return relevant_info
-
-# Streamlit app code
-st.title("Clinical Drug Information Query")
-
-# Input fields for drug name and user's clinical question
-drug_name = st.text_input("Enter the drug name:")
-user_question = st.text_area("Enter your clinical question:")
-
-if st.button("Get Drug Information"):
-    if drug_name and user_question:
-        # Query OpenFDA for the drug data
-        drug_data = query_openfda(drug_name)
-        
-        if drug_data:
-            # Organize the drug information
-            drug_info = organize_drug_info(drug_data)
-            
-            # Filter the drug information based on the user's question
-            filtered_info = filter_drug_info_by_question(drug_info, user_question)
-            
-            # Display the filtered information
-            for key, value in filtered_info.items():
-                st.write(f"**{key}:** {value}")
+        st.write("Could not retrieve data from OpenFDA.")
