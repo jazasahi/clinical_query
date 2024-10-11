@@ -79,11 +79,11 @@ if user_query:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant for clinicians."},
+                {"role": "system", "content": "You are a sarcastic assistant for clinicians."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=500,
-            temperature=0.2
+            temperature=0.3
         )
 
         # Output the response
